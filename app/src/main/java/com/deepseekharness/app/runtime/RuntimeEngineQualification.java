@@ -207,6 +207,25 @@ public final class RuntimeEngineQualification {
       primary = failure;
       throw failure;
     } finally {
+      // 诊断出口：引擎探针失败时把已捕获的原始输出打到 logcat。
+      // receipt 会脱敏掉 output，设备上又没有 root 去读私有目录，这条 logcat 是唯一
+      // 能看到 bxroot/supervisor 真实 stderr（ENGINE_FAILURE 的具体分支、退出码、信号）
+      // 的通道。只读输出，不影响任何判定。
+      if (result != null) {
+        String detail = result.output == null ? "" : result.output;
+        if (detail.length() > 1800) detail = detail.substring(0, 1800) + "...<truncated>";
+        android.util.Log.e(
+            "DSHA-DIAG",
+            "engine-qualification kind=" + kind
+                + " packages=" + packages
+                + " exit=" + result.exitCode
+                + " timedOut=" + result.timedOut
+                + " outcome=" + outcome
+                + " output=" + detail.replace("
+", " | "));
+      } else {
+        android.util.Log.e("DSHA-DIAG", "engine-qualification kind=" + kind + " no-result");
+      }
       // The diagnostic is not closure evidence. Retain unknown output before any cleanup.
       try {
         File receipts =

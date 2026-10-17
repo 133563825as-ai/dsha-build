@@ -110,6 +110,20 @@ final class IsolatedInstallProcess extends Process implements AutoCloseable, Own
     } finally {
       if (!accepted) {
         operation.uncertain();
+        // 诊断出口：supervisor 启动/握手失败时把现场打到 logcat（无 root 时唯一可得）。
+        if (supervisor != null) {
+          int code = -1;
+          try {
+            code = supervisor.exitValue();
+          } catch (IllegalThreadStateException stillRunning) {
+            code = Integer.MIN_VALUE;
+          }
+          android.util.Log.e(
+              "DSHA-DIAG",
+              "isolated-install supervisor pid=" + supervisor.pid()
+                  + " exit=" + (code == Integer.MIN_VALUE ? "RUNNING" : code)
+                  + " command=" + String.join(" ", target.command()));
+        }
         // START 可能已送达时，先保留通道收取真实 ECHILD 与 launcher 退出，不能先断开证明。
         if (control != null && !control.neverDispatched() && ready != null) {
           try {
