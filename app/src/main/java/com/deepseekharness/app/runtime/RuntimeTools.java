@@ -408,6 +408,10 @@ final class RuntimeTools {
         writeIfChanged(
             context, module, patched.getBytes(java.nio.charset.StandardCharsets.UTF_8), false);
     } catch (IllegalArgumentException error) {
+      // 0.2.1 起上游删掉了 isLoopback 开关：settings 的 describe/mutate 直接串行写 host
+      // （源码注释 "serialized Host writes"），持久化成为默认行为，本补丁已无实际作用。
+      // 只有拿到这个「上游已吸收」的证据才放过；其它结构变化仍然 fail-closed。
+      if (source.contains("serialized Host writes")) return;
       throw new IOException("LAN_SETTINGS_PATCH_MISMATCH", error);
     }
   }
