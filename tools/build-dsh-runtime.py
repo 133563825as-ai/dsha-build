@@ -123,8 +123,10 @@ def patched_content(relative, data):
     if name == LEXICAL_CLAIM_MODULE:
         text = data.decode('utf-8')
         expected = json.loads((LOCK_ROOT / 'package.json').read_text(encoding='utf-8'))['dependencies']['@deepseek-ai/dsh']
-        for recipe_path, label in ((LEXICAL_CLAIM_PATCH, 'Lexical claim'),
-                                   (CONVERSATION_MATERIALIZED_PATCH, 'conversation materialized')):
+        # lexical-claim 已退役：0.2.1 把 client-ui-conversation 的装饰层整体重写并压缩化，
+        # 原锚点依赖的 TOKEN_STYLE 常量与 splitText 现场已不存在，无法在压缩产物上安全重定锚。
+        # 配方文件保留在 assets/ 里作历史，行为回归需在真机复核「输入 token 后高亮样式溢出」。
+        for recipe_path, label in ((CONVERSATION_MATERIALIZED_PATCH, 'conversation materialized'),):
             recipe = json.loads(recipe_path.read_text(encoding='utf-8'))
             if recipe.get('module') != name or recipe.get('dshVersion') != expected:
                 raise ValueError(f'{label} 补丁目标或 DSH 版本未锁定')
@@ -479,10 +481,12 @@ var DshaRecordHints = class {
         text = text.replace(create_anchor, create_replacement)
         # The emitted JS has no private field declarations. Add the field next
         # to the tracker declaration in the class body instead.
-        class_anchor = '''\ttracker = new JsonlBackendTracker(this.name);\n\tgenerationFormat;'''
+        # 0.2.1 把 tracker 改成构造注入（constructor(ctx, config, tracker)），
+        # 类字段区变成 `config;\n\ttracker;`，不再有 `tracker = new JsonlBackendTracker(this.name)`。
+        class_anchor = '''var JsonlSessionPersistence = class extends SessionPersistence {\n\tconfig;\n\ttracker;'''
         if text.count(class_anchor) != 1:
             raise ValueError('会话后端 tracker 结构变化，必须重新检查')
-        text = text.replace(class_anchor, '''\ttracker = new JsonlBackendTracker(this.name);\n\tdshaSessionHints = new DshaSessionHints();\n\tgenerationFormat;''')
+        text = text.replace(class_anchor, class_anchor + '\n\tdshaSessionHints = new DshaSessionHints();')
         find_anchor = '''\tasync findLog(id, signal) {\n\t\tconst matches = [];'''
         find_replacement = '''\tasync findLog(id, signal) {\n\t\tconst hinted = this.dshaSessionHints.get(id);\n\t\tif (hinted !== void 0) {\n\t\t\tconst selected = await this.resolveHintedGeneration(hinted, id, signal);\n\t\t\tif (selected !== void 0) return selected;\n\t\t\tthis.dshaSessionHints.forget(id);\n\t\t}\n\t\tconst matches = [];'''
         if text.count(find_anchor) != 1:
@@ -498,7 +502,9 @@ var DshaRecordHints = class {
         if text.count(release_anchor) != 1:
             raise ValueError('会话 releaseHandle 结构变化，必须重新检查')
         text = text.replace(release_anchor, release_replacement)
-        hints_anchor = '''/**\n* The JSONL persistence backend.'''
+        # 0.2.1 把「The JSONL persistence backend」注释挪进了 zstd.js 段，
+        # 改用唯一且稳定的 tracker 类声明作为注入点（class 定义在同一模块顶层）。
+        hints_anchor = '''var JsonlBackendTracker = class {'''
         hints_code = '''/* DSHA_SESSION_DIRECT_HINTS_V1 */\nclass DshaSessionHints {\n\tentries = new Map();\n\tremember(header) {\n\t\tif (header && typeof header.id === "string") this.entries.set(header.id, { id: header.id, cwd: header.cwd });\n\t}\n\tget(id) { return this.entries.get(id); }\n\tforget(id) { this.entries.delete(id); }\n}\n'''
         if text.count(hints_anchor) != 1:
             raise ValueError('会话后端类锚点变化，必须重新检查')

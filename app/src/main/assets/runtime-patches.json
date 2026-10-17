@@ -1,6 +1,6 @@
 {
   "schema": 1,
-  "dshVersion": "0.2.0-rc.2",
+  "dshVersion": "0.2.1-rc.2",
   "active": [
     {
       "asset": "composer-enter-patch.json",
@@ -43,12 +43,6 @@
     },
     {
       "asset": "language-patch.json"
-    },
-    {
-      "asset": "tooltip-interaction-patch.json",
-      "markers": [
-        "DSHA_TOOLTIP_DISMISS_RC2_V1"
-      ]
     },
     {
       "asset": "tooltip-entry-patch.json"
@@ -124,6 +118,10 @@
     {
       "asset": "web-integration/tooltip-patch.json",
       "reason": "Old 0.1.5 component replacement preserved as history. Current rc2 interaction/entry recipes retain the upstream Tooltip and add dismissal only."
+    },
+    {
+      "asset": "tooltip-interaction-patch.json",
+      "reason": "0.2.1 重写了 web-frontend bundle（index-CN7NIWNw.js），tooltip dismissal 的 useCallback 特征串与变量名全变，无法在压缩产物上安全重定锚。tooltip-entry 的 cache-bust 仍在生效。"
     }
   ]
 }

@@ -17,6 +17,11 @@ ROOT = Path(__file__).resolve().parents[1]
 # a future runtime must add a reviewed entry here after comparing its readers.
 READ_COMPATIBILITY = {
     '0.2.0-rc.2': ['dsh-0.1.7-rc.1', 'dsh-0.1.7-rc.2'],
+    # 0.2.1-rc.2 仍读写同一套 session catalog 与 storage-json，并额外发布了显式的
+    # dsh-session-format-v0-to-v1 … v3-to-v4 迁移包（读取器带迁移链），因此可以读取
+    # 0.2.0-rc.2 写出的记录。**注意**：这一条来自包结构证据，尚未在真机上做
+    # 「0.2.0 写 → 0.2.1 读」的实测；设备验收必须单独确认老会话可正常打开。
+    '0.2.1-rc.2': ['dsh-0.1.7-rc.1', 'dsh-0.1.7-rc.2', 'dsh-0.2.0-rc.2'],
 }
 
 def digest(path):
