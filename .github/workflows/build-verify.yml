@@ -124,24 +124,40 @@ jobs:
           NPM_CONFIG_LEGACY_PEER_DEPS: "true"
         run: python3 -B tools/prepare-dsh-runtime.py
 
-      - name: Assemble standard debug APK
+      - name: Assemble standard release APK (unsigned)
+        # 必须是 release（debuggable=false）：调试版在 vivo/Android 16 上读不到一致的
+        # 进程出生身份，冷安装会在 OWNED_CONTROL_ACCEPT / PROCESS_BIRTH_RECHECK 直接失败。
         run: |
           export LANG=C.UTF-8 LC_ALL=C.UTF-8
           chmod +x gradlew
-          ./gradlew --no-daemon --max-workers=2 :app:assembleStandardDebug
+          ./gradlew --no-daemon --max-workers=2 \
+            :app:assembleStandardRelease -Pdsha.unsignedPackage=true
+
+      - name: Sign with the test keystore
+        run: |
+          BT="$ANDROID_HOME/build-tools/36.0.0"
+          unsigned=$(find app/build/outputs/apk/standard/release -name '*-unsigned.apk' | head -1)
+          test -n "$unsigned" || { echo "unsigned APK not found"; ls -R app/build/outputs/apk | head -40; exit 1; }
+          "$BT/apksigner" sign --ks ci/test-signing.keystore \
+            --ks-pass pass:android --key-pass pass:android \
+            --ks-key-alias androiddebugkey \
+            --out "$RUNNER_TEMP/dsha-standard-release.apk" "$unsigned"
+          "$BT/apksigner" verify --print-certs "$RUNNER_TEMP/dsha-standard-release.apk"
+          echo "SIGNED_APK=$RUNNER_TEMP/dsha-standard-release.apk" >> "$GITHUB_ENV"
 
       - name: Report APK identity
         run: |
-          apk=$(find app/build/outputs/apk -name '*.apk' | head -1)
-          test -n "$apk" || { echo "APK not found"; exit 1; }
+          apk="$SIGNED_APK"
+          test -f "$apk" || { echo "APK not found"; exit 1; }
           ls -lh "$apk"
+          "$ANDROID_HOME/build-tools/36.0.0/aapt2" dump badging "$apk" | grep -E "^package|application-debuggable" || true
           sha256sum "$apk" | tee "$RUNNER_TEMP/apk.sha256"
 
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: dsha-standard-debug-apk
           path: |
-            app/build/outputs/apk/**/*.apk
+            ${{ runner.temp }}/dsha-standard-release.apk
             ${{ runner.temp }}/apk.sha256
           if-no-files-found: error
           retention-days: 14
