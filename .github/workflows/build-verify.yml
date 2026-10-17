@@ -1,0 +1,65 @@
+name: build-verify
+
+# 用途：在 GitHub 上验证「源码能编译、单测能过、原生库锁定成立」。
+# 不产出正式签名包（签名密钥不在仓库里），也不跑设备验收。
+on:
+  workflow_dispatch:
+  push:
+    branches: ["build/**", "feat/**", "fix/**"]
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Pin the Linux-only aapt2 verification entry
+        # 仓库里的 verification-metadata.xml 在 Windows 生成，只 pin 了 aapt2-windows.jar；
+        # Linux 上 AGP 解析 aapt2-9.1.1-14792394-linux.jar 会因缺校验条目直接失败。
+        # 只补这一条（Google Maven 的 sha256），其余仍保持严格校验。
+        run: python3 ci/patch-verification-metadata.py gradle/verification-metadata.xml
+
+      - name: bxroot native closure is byte-exact
+        run: |
+          python3 -B tools/bxroot/build.py --check
+          python3 -B tools/prepare-bxroot-native-proof.py --check
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+
+      - name: Android SDK 37 + build-tools 36 + NDK 26
+        run: |
+          SDK="${ANDROID_SDK_ROOT:-${ANDROID_HOME:-/usr/local/lib/android/sdk}}"
+          echo "ANDROID_HOME=$SDK" >> "$GITHUB_ENV"
+          echo "ANDROID_SDK_ROOT=$SDK" >> "$GITHUB_ENV"
+          SM="$SDK/cmdline-tools/latest/bin/sdkmanager"
+          [ -x "$SM" ] || SM="$SDK/cmdline-tools/bin/sdkmanager"
+          yes | "$SM" --licenses >/dev/null 2>&1 || true
+          "$SM" "platforms;android-37.0" "build-tools;36.0.0" "ndk;26.3.11579264"
+
+      - name: Compile + unit tests (standard debug)
+        run: |
+          export LANG=C.UTF-8 LC_ALL=C.UTF-8
+          chmod +x gradlew
+          ./gradlew --no-daemon :app:testStandardDebugUnitTest
+
+      - name: Upload unit test reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: unit-test-reports
+          path: app/build/reports/tests/**
+          if-no-files-found: ignore
+          retention-days: 7
