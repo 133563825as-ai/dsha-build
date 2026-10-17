@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "runtimeId": "fec1731f6ba5952e80fd96c01eb354142dfc1b541d7170a20091f826d8655794",
+  "runtimeId": "312014ce71e20305545d32d29ec290519138af3803605ae033fe8156ac896963",
   "baseVersion": "10",
   "dshVersion": "0.2.0-rc.2",
   "launcherContract": "DSHA_ARM64_V2",
@@ -362,7 +362,7 @@
     "util/VirtualScreenFailures.java": "d264a896ed24c6a5d48dd8c702130a30a274028b99a636cb12d9888d122330af",
     "util/VirtualScreenInputPolicy.java": "bc9e2eca5e3566b78b2333719cd519a95f66fced3e062d6e621e3a8fb20dc162",
     "util/VirtualScreenInputResult.java": "26d192c03aa54cc80567b2ab389623418e6813e322e7a44e5bb5ee214b576172",
-    "util/VirtualScreenPolicy.java": "0be63e73bfd4e55bb5eceb71faef758638833d7bd19e957dbb0edf4cbc0cb658",
+    "util/VirtualScreenPolicy.java": "5be67a10923a8a6ca4e2e7840657f8b0c488fe4da2a313a51abbb26b28e396f2",
     "util/VirtualScreenRequestFence.java": "2e018bfdfe49eb66196945888dc1c332129760af9806a2ed07b6cd9b8aa72e43",
     "util/VirtualScreenRoutes.java": "abc17ea7726bb6d92dcd4b519702edb791a93ab6d5d02825e0f6608e694fe26e",
     "util/VirtualScreenStroke.java": "953596b17f7d5c556959edd47f5a5db0ec6cedc79d2f776a76c0681aeefa2f1f",
@@ -383,8 +383,8 @@
     "util/WebUploadSourceRetry.java": "2a1ac28b8f197540e2296207c92c4da66beff504a523e92d02ef21f0674b3227",
     "util/WebUploadStream.java": "d8f590fc1f9b095a5d22879e892a244761500cbe33ac8e42a9bf355e37abc42a",
     "vscreen/VirtualScreenAccessibility.java": "2f5b100f9be7c37d8f3d58fc33812e44318dffc7d3b78704a8a76a80a83e4012",
-    "vscreen/VirtualScreenCore.java": "aee5141ccc5d092af29f88de10e6d02d91c289f0dd3e8ee5cd9b163d4ad1ebc6",
-    "vscreen/VirtualScreenManager.java": "796afa20556e9269414db02943e48052338d2e0df785d0e47d19f101c2319d64",
+    "vscreen/VirtualScreenCore.java": "463d3dec9ff48b68ba9f4ba3fc3159c39dde5d4a1b1edf620652d2e7a4591f88",
+    "vscreen/VirtualScreenManager.java": "d52824d0812e875fa18a1e7ddf9015ef65b0705869283f85f045c52d4b6a8bb9",
     "vscreen/VirtualScreenPreviews.java": "699a37edf8cedd6095bb774c5e8cbadf2608fa00e16ed29955e168ce72e767e4"
   },
   "bridgeProtocol": 4,
