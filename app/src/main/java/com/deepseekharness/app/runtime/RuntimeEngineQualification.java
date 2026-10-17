@@ -221,8 +221,7 @@ public final class RuntimeEngineQualification {
                 + " exit=" + result.exitCode
                 + " timedOut=" + result.timedOut
                 + " outcome=" + outcome
-                + " output=" + detail.replace("
-", " | "));
+                + " output=" + detail.replace("\n", " | "));
       } else {
         android.util.Log.e("DSHA-DIAG", "engine-qualification kind=" + kind + " no-result");
       }
