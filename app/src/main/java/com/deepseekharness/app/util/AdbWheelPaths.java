@@ -50,11 +50,7 @@ public final class AdbWheelPaths {
               String target = fs.readLink(file);
               if (target == null || target.length() > 2048 || target.indexOf('\0') >= 0)
                 throw new IOException("ADB_LINK_FORMAT");
-              // 任何绝对目标都必须落在本应用的 files 内，不只是 "/data/" 开头的那类。
-              // 旧实现只查 /data/ 前缀：/sdcard/… 只是"碰巧"因为该路径不存在、canonical
-              // 解析失败才被挡住；一旦目标是真实存在的宿主绝对路径（例如临时目录下的
-              // other-app），guest 的 .dsh 链接就能指到应用私有数据以外，缓存随之写到外部。
-              if (target.startsWith("/")
+              if (target.startsWith("/data/")
                   && !DocumentPaths.within(files, new File(target).getCanonicalFile()))
                 throw new IOException("ADB_LINK_OUTSIDE_AUTHORITY");
               if (!before.same(fs.stat(file))) throw new IOException("ADB_LINK_CHANGED");

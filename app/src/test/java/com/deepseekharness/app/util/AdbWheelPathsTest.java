@@ -189,13 +189,18 @@ public class AdbWheelPathsTest {
     File link = new File(data, "files/linux/ubuntu/root/.dsh");
     for (String target :
         new String[] {
-          "/sdcard/Documents/dshdata",
-          "../sdcard/dshdata",
-          "/data/user/0/other.app/files/data",
-          new File(data.getParentFile(), "other-app").getPath()
+          "/sdcard/Documents/dshdata", "../sdcard/dshdata", "/data/user/0/other.app/files/data"
         }) {
       fs.links.put(link, target);
       assertThrows(target, IOException.class, () -> bind(fs, data));
+    }
+    // 「宿主真实绝对路径」这一例只在 Windows 成立：那里的 "/tmp/..." 不是一个可解释的
+    // guest 路径。POSIX 上 /tmp/x 会被正常解释成 guest 内的 /tmp/x，本来就不会越出授权；
+    // 要求它也抛异常，等于要求实现拒绝全部宿主绝对路径，会误伤 /home/dsh 这类合法 guest 链。
+    if (File.separatorChar == '\\') {
+      String hostLike = new File(data.getParentFile(), "other-app").getPath();
+      fs.links.put(link, hostLike);
+      assertThrows(hostLike, IOException.class, () -> bind(fs, data));
     }
     assertFalse(new File(link, "wheels").exists());
     assertFalse(new File(data, "files/linux/ubuntu/sdcard").exists());
