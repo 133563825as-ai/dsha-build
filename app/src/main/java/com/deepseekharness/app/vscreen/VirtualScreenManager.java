@@ -51,6 +51,16 @@ public final class VirtualScreenManager {
   private final ThreadLocal<String> BRIDGE_TARGET = new ThreadLocal<>();
   private final ThreadLocal<BooleanSupplier> BRIDGE_AUTHORITY = new ThreadLocal<>();
   private ScheduledFuture<?> heartbeat;
+
+  /**
+   * 心跳连续失败计数。单次 ping 失败可能只是连接池满、GC 停顿或一次网络抖动；
+   * 旧实现「一次失败即销毁会话」会让虚拟屏在长手势期间莫名其妙消失。连续失败才判死。
+   */
+  private int heartbeatFailures;
+
+  /** 连续失败多少次销毁会话：10s 一次心跳，3 次 = 至少 30s 的可观测故障。 */
+  private static final int HEARTBEAT_FAILURE_LIMIT = 3;
+
   private static final long ADB_LAUNCH_TTL_MS = 30_000;
   private final OneShotLaunchAuthority ADB_LAUNCH = new OneShotLaunchAuthority();
   private static final Pattern STARTED =
@@ -536,15 +546,34 @@ public final class VirtualScreenManager {
         available
             ? perform(session, "/vscreen/ping", "", false)
             : failure("DEVICE_CHANNEL_UNAVAILABLE");
-    if (!ping.optBoolean("ok")) stopIfCurrent(session);
+    if (ping.optBoolean("ok")) {
+      synchronized (LOCK) {
+        heartbeatFailures = 0;
+      }
+      return;
+    }
+    int failures;
+    synchronized (LOCK) {
+      failures = ++heartbeatFailures;
+    }
+    if (failures < HEARTBEAT_FAILURE_LIMIT) return;
+    // 连续失败达到阈值才销毁：并把这一次销毁记成诊断，避免"虚拟屏自己没了"无从查起。
+    recordDiagnostic("VSCREEN_HEARTBEAT_LOST", ping.optString("error", "UNKNOWN"));
+    stopIfCurrent(session);
   }
 
   public JSONObject status() {
     return request("/vscreen/status", "");
   }
 
+  /**
+   * 本地预览轮询专用：取像素但**不登记观察**（observe=0）。
+   *
+   * <p>观察状态只由调用方自己的 see/preview 写入。若轮询也写，它就会每 250ms 替所有调用方续一次观察，
+   * 让「只拿 status 的 frameSeq 就点按」变成合法路径，输入帧门形同虚设。
+   */
   public JSONObject preview() {
-    return request("/vscreen/preview", "");
+    return request("/vscreen/preview", "observe=0");
   }
 
   /** 授权与语义操作只需要本次显示身份；旧像素元数据不能阻断它们。 */
@@ -750,11 +779,23 @@ public final class VirtualScreenManager {
   }
 
   public JSONObject close() {
+    // 桥/工具调用（非 UI 线程）：同步返回对端关闭结果。
     return stopResult();
   }
 
+  /**
+   * UI 侧停止：本机状态在调用线程内同步切换（detachLocked 纯内存，微秒级），
+   * 对端 /vscreen/close（read 超时 12s）与无障碍清理投给 WORKER。
+   *
+   * <p>旧实现整条链留在调用线程，而调用点就是「停止」按钮，Core 卡在手势或网络抖动时
+   * 主线程最长阻塞 2–14s，属于可复现的 ANR 面。visuals.stopped 自己会 post 回主线程。
+   */
   public void stop() {
-    stopResult();
+    ClosedSession closed;
+    synchronized (LOCK) {
+      closed = detachLocked();
+    }
+    WORKER.execute(() -> closeDetached(closed));
   }
 
   private void stopIfCurrent(Snapshot session) {
@@ -792,6 +833,12 @@ public final class VirtualScreenManager {
         activeEpoch = -1;
         stateRevision++;
         frameSequence = -1;
+        heartbeatFailures = 0;
+        // 启动已失败：排定的心跳必须取消，否则它会每 10s 空转一次直到下次 start 覆盖。
+        if (heartbeat != null) {
+          heartbeat.cancel(false);
+          heartbeat = null;
+        }
       }
     }
   }

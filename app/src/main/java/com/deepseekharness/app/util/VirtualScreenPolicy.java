@@ -35,6 +35,21 @@ public final class VirtualScreenPolicy {
     return observed > 0 && observed == current;
   }
 
+  /**
+   * 输入用的有界帧容差。帧线程 33ms 采样一次，`see` 到真正下发输入之间画面通常已经
+   * 前进 1–3 帧；旧的严格等值判定（observed == current）会让任何 ≥1fps 的界面坐标输入
+   * 必然 FRAME_EXPIRED，30s 观察窗口在这种情况下也永远用不上。
+   *
+   * <p>注意它只放宽「画面往前走了几帧」，不放宽「调用方看没看过」：
+   * 不能凭 status 的 frameSeq 声称自己观察过（那一层由 observe 标记守住）。
+   */
+  public static final long FRAME_TOLERANCE = 3;
+
+  /** 请求的帧是否落在最新帧的有界容差内（不允许请求比当前更新的帧）。 */
+  public static boolean recent(long requested, long current) {
+    return requested > 0 && current >= requested && current - requested <= FRAME_TOLERANCE;
+  }
+
   /** 权限探测结果；{@code UNKNOWN} 表示查不出来，一律按"不持有"处理。 */
   public enum TrustedDisplayPermission {
     HELD,
@@ -74,7 +89,8 @@ public final class VirtualScreenPolicy {
    * 返回 null 表示放行，否则返回稳定的拒绝码。
    */
   public static String observationRejection(long requested, long observed, long ageMs) {
-    if (requested <= 0 || observed != requested) return FRAME_NOT_OBSERVED;
+    // requested > observed：调用方声称基于比它实际观察到的更新的帧，属于猜测而非观察。
+    if (requested <= 0 || observed <= 0 || requested > observed) return FRAME_NOT_OBSERVED;
     return ageMs > OBSERVATION_WINDOW_MS ? OBSERVATION_TIMEOUT : null;
   }
 
@@ -92,11 +108,19 @@ public final class VirtualScreenPolicy {
   }
 
   /**
-   * 输入帧门的完整判定（核心用的就是这个组合）：先问"这一帧是不是你刚看过的那一帧"，
-   * 再问"它还是不是最新帧"。返回 null 表示放行，否则返回稳定的拒绝码。
+   * 输入帧门的完整判定（核心用的就是这个组合）：
+   *
+   * <ol>
+   *   <li>先问「这一帧你确实看过吗」（requested 不能超过实际观察到的帧）；
+   *   <li>再问「画面从你看过之后有没有走远」（有界容差 {@link #FRAME_TOLERANCE} 帧）；
+   *   <li>最后问「那次观察距今多久」。
+   * </ol>
+   *
+   * 返回 null 表示放行，否则返回稳定的拒绝码。
    */
   public static String inputRejection(long requested, long current, long observed, long ageMs) {
     String rejected = observationRejection(requested, observed, ageMs);
-    return rejected != null ? rejected : frameRejection(requested, current);
+    if (rejected != null) return rejected;
+    return recent(requested, current) ? null : FRAME_EXPIRED;
   }
 }

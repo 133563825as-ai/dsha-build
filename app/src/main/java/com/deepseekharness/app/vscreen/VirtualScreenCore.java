@@ -302,7 +302,10 @@ public final class VirtualScreenCore {
       }
       if (path.equals("/vscreen/launch")) return launchPackage(q.get("package"));
       if (path.equals("/vscreen/preview"))
-        return preview(Long.parseLong(q.getOrDefault("since", "-1")), q.get("generation"));
+        return preview(
+            Long.parseLong(q.getOrDefault("since", "-1")),
+            q.get("generation"),
+            !"0".equals(q.getOrDefault("observe", "1")));
       if (path.equals("/vscreen/touch")) {
         if (!session.generation.equals(q.get("generation"))) return error("STALE_GENERATION");
         String stroke = q.getOrDefault("stroke", "");
@@ -323,7 +326,14 @@ public final class VirtualScreenCore {
             if (rejection != null)
               return staleFrame(rejection, requested, session.sequence, session.observed);
             session.observed = -1;
+            session.strokeStartedAt = SystemClock.elapsedRealtime();
           }
+        } else if (session.strokeStartedAt == 0
+            || SystemClock.elapsedRealtime() - session.strokeStartedAt
+                > VirtualScreenPolicy.OBSERVATION_WINDOW_MS) {
+          // MOVE/UP 也必须挂在一条足够新的手势上。旧实现只有 DOWN 过帧门，之后可以无限发
+          // MOVE（每条都刷新 stroke.lastAt，永不触发悬空回收）把指针拖到从未观察过的位置。
+          return error(VirtualScreenPolicy.OBSERVATION_TIMEOUT);
         }
         return inputResult(session.input.touch(stroke, action, x, y));
       }
@@ -357,8 +367,10 @@ public final class VirtualScreenCore {
           if (ms < 0 || ms > 3000) return error("INVALID_DURATION");
           String stroke = UUID.randomUUID().toString();
           session.observed = -1;
+          boolean downAccepted = false;
           try {
             if (!session.input.touch(stroke, 0, x, y).accepted()) return inputFailure(session);
+            downAccepted = true;
             int steps = Math.max(1, ms / 16);
             for (int n = 1; n < steps; n++) {
               Thread.sleep(16);
@@ -369,7 +381,9 @@ public final class VirtualScreenCore {
             }
             return inputResult(session.input.touch(stroke, 1, endX, endY));
           } finally {
-            session.input.cancel();
+            // 只有本次请求真的开始过一次手势才取消：DOWN 被拒时 cancel() 会作用到
+            // **另一条** 客户端正在进行中的 touch 流上，把它整条打断。
+            if (downAccepted) session.input.cancel();
           }
         }
         if (path.equals("/vscreen/key")) {
@@ -381,6 +395,10 @@ public final class VirtualScreenCore {
         String text = q.getOrDefault("text", "");
         if (text.isEmpty() || text.length() > 2000) return error("INVALID_TEXT");
         if (!text.matches("[\\x20-\\x7e]+")) return error("ACCESSIBILITY_REQUIRED_FOR_UNICODE");
+        // /system/bin/input text 把 "%s" 当成空格，且没有转义字面 % 的手段：
+        // 直接下发会把 "100%s" 静默变成 "100 "。宁可给稳定拒绝码，让调用方改走
+        // 无障碍 text/editor 工具，也不要悄悄改坏用户的文本。
+        if (text.indexOf('%') >= 0) return error("TEXT_PERCENT_UNSUPPORTED");
         session.observed = -1;
         return inputResult(session.input.text(text));
       }
@@ -394,7 +412,10 @@ public final class VirtualScreenCore {
   private static JSONObject create(int width, int height) throws Exception {
     int[] size = VirtualScreenPolicy.phoneSize(width, height);
     if (session != null && session.width == size[0] && session.height == size[1]) return status();
-    release();
+    // 先把新会话完整建起来，成功后才替换旧的。旧实现先 release() 再建：新显示一旦被拒
+    // （TRUSTED_DISPLAY_DENIED / DISPLAY_CREATE_FAILED），原来的屏就永久丢了；而心跳只 ping、
+    // 不需要 session，仍会一直成功，UI 停在错误态且无法自愈。
+    Session previous = session;
     ImageReader reader = ImageReader.newInstance(size[0], size[1], PixelFormat.RGBA_8888, 3);
     boolean trusted =
         VirtualScreenPolicy.requestTrustedDisplay(
@@ -424,9 +445,17 @@ public final class VirtualScreenCore {
       created = new Session(display, reader, size[0], size[1]);
       session = created;
       created.start();
+      if (previous != null) {
+        try {
+          previous.close();
+        } catch (Throwable cleanup) {
+          // 旧屏释放失败不能影响新会话：它已经不再被 session 引用。
+        }
+      }
       return status();
     } catch (Throwable error) {
-      session = null;
+      // 失败保留旧会话，不能把用户的屏弄丢。
+      session = previous;
       if (created != null) {
         created.active = false;
         try {
@@ -517,30 +546,37 @@ public final class VirtualScreenCore {
     return "";
   }
 
-  private static JSONObject preview(long since, String generation) throws Exception {
+  private static JSONObject preview(long since, String generation, boolean observe) throws Exception {
     Bitmap copy;
     long seq, captured;
     synchronized (session.lock) {
       if (session.frame == null) return error("FRAME_NOT_READY");
       if (since == session.sequence && session.generation.equals(generation)) {
-        // 调用方声明它持有的就是当前帧：同样登记为一次有效观察。
-        session.observed = session.sequence;
-        session.observedAt = SystemClock.elapsedRealtime();
+        // 调用方声明它持有的就是当前帧。**只有真的"看"才算一次观察**：
+        // 本地预览轮询（VirtualScreenPreviews，250ms）走 observe=0，否则它会替所有调用方
+        // 续观察，让「只拿 status 的 frameSeq 就盲点」变成合法路径（输入帧门形同虚设）。
+        if (observe) {
+          session.observed = session.sequence;
+          session.observedAt = SystemClock.elapsedRealtime();
+        }
         return status().put("unchanged", true).put("frameSeq", session.sequence);
       }
-      copy = session.frame.copy(Bitmap.Config.ARGB_8888, false);
       seq = session.sequence;
       captured = session.capturedAt;
-      session.observed = seq;
-      session.observedAt = SystemClock.elapsedRealtime();
-    }
-    Bitmap scaled = null;
-    try {
+      if (observe) {
+        session.observed = seq;
+        session.observedAt = SystemClock.elapsedRealtime();
+      }
+      // 编码缓存命中时不必整张拷贝：旧顺序是先 copy 再判缓存，4Hz 轮询等于每秒白拷 ~29MB。
       if (session.encodedSequence == seq)
         return status()
             .put("frameSeq", seq)
             .put("previewB64", session.encoded)
             .put("frameAgeMs", SystemClock.elapsedRealtime() - captured);
+      copy = session.frame.copy(Bitmap.Config.ARGB_8888, false);
+    }
+    Bitmap scaled = null;
+    try {
       int width = Math.min(720, copy.getWidth()),
           height = Math.round(copy.getHeight() * width / (float) copy.getWidth());
       scaled = Bitmap.createScaledBitmap(copy, width, height, true);
@@ -620,6 +656,12 @@ public final class VirtualScreenCore {
     boolean ended = process.waitFor(8, TimeUnit.SECONDS);
     if (!ended) process.destroy();
     reader.join(500);
+    if (reader.isAlive()) {
+      // 管道没排空：主线程读到的会是半截文本（ByteArrayOutputStream 跨线程读写），
+      // LAUNCH_REJECTED / resolve-activity 的判据会失真。按「结果未知」上报，
+      // 不要把半截输出当成确定结论，更不要把确定码盖成 OPERATION_FAILED。
+      return new Result(ended ? process.exitValue() : -1, "", true);
+    }
     return new Result(ended ? process.exitValue() : -1, output.toString("UTF-8"), !ended);
   }
 
@@ -752,7 +794,7 @@ public final class VirtualScreenCore {
     final String generation = UUID.randomUUID().toString();
     volatile boolean active = true;
     volatile long sequence;
-    long observed = -1, observedAt, capturedAt, encodedSequence = -1;
+    long observed = -1, observedAt, capturedAt, encodedSequence = -1, strokeStartedAt;
     String packageName = "", encoded = "";
     Bitmap frame;
     final VirtualScreenInput input;
@@ -781,13 +823,16 @@ public final class VirtualScreenCore {
                           next.recycle();
                           break;
                         }
-                        if (frame != null && frame.sameAs(next)) next.recycle();
-                        else {
+                        if (frame != null && frame.sameAs(next)) {
+                          next.recycle();
+                          // 帧内容没变就不要刷新 capturedAt：否则画面冻结时
+                          // frameAgeMs 恒为 0，preview/诊断无法看出「这屏已经很久没动了」。
+                        } else {
                           if (frame != null) frame.recycle();
                           frame = next;
                           sequence++;
+                          capturedAt = SystemClock.elapsedRealtime();
                         }
-                        capturedAt = SystemClock.elapsedRealtime();
                       }
                     }
                   } catch (Throwable ignored) {

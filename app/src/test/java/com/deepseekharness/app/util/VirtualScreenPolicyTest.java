@@ -92,4 +92,22 @@ public class VirtualScreenPolicyTest {
     // 看过、仍是最新帧，但超过 30 秒窗口。
     assertEquals("OBSERVATION_TIMEOUT", VirtualScreenPolicy.inputRejection(5, 5, 5, 30_001));
   }
+
+  @Test
+  public void toleratesAFewFramesAdvancingBetweenSeeAndInput() {
+    // 帧线程 33ms 采样一次：从 see 到真正下发输入，画面前进 1–3 帧是常态，
+    // 严格等值会让任何 ≥1fps 的界面上坐标输入必然失败（build173 前的实际表现）。
+    assertNull(VirtualScreenPolicy.inputRejection(5, 6, 5, 900));
+    assertNull(VirtualScreenPolicy.inputRejection(5, 7, 5, 900));
+    assertNull(VirtualScreenPolicy.inputRejection(5, 8, 5, 900));
+    // 落后超过容差（4 帧 ≈ 130ms）才算过期。
+    assertEquals("FRAME_EXPIRED", VirtualScreenPolicy.inputRejection(5, 9, 5, 900));
+    // 容差只放宽"画面往前走了几帧"，不放宽"你看没看过"：
+    // 请求比实际观察更新的帧仍然是猜，必须拒绝。
+    assertEquals("FRAME_NOT_OBSERVED", VirtualScreenPolicy.inputRejection(7, 7, 5, 900));
+    // 也不放宽时间窗口。
+    assertEquals("OBSERVATION_TIMEOUT", VirtualScreenPolicy.inputRejection(5, 7, 5, 30_001));
+    // 帧回退不是"新鲜"，仍是过期。
+    assertEquals("FRAME_EXPIRED", VirtualScreenPolicy.inputRejection(5, 4, 5, 900));
+  }
 }
