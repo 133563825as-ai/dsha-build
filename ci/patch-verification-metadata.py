@@ -68,7 +68,9 @@ def insert_into_component(text, group, component, version, artifact, sha, newlin
 
 
 def append_component(text, group, component, version, artifact, sha, newline):
-    close = text.rindex("</verification-metadata>")
+    # 新 component 必须落在 <components> 里：放到根节点下 Gradle 会报
+    # "Invalid dependency verification metadata file: <component> must be found under the <components> tag"。
+    close = text.rindex("</components>")
     head = text[:close]
     body = head.rstrip()
     gap = head[len(body):]
