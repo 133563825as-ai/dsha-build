@@ -120,8 +120,8 @@ final class IsolatedInstallProcess extends Process implements AutoCloseable, Own
           }
           android.util.Log.e(
               "DSHA-DIAG",
-              "isolated-install supervisor pid=" + supervisor.pid()
-                  + " exit=" + (code == Integer.MIN_VALUE ? "RUNNING" : code)
+              "isolated-install supervisor exit="
+                  + (code == Integer.MIN_VALUE ? "RUNNING" : code)
                   + " command=" + String.join(" ", target.command()));
         }
         // START 可能已送达时，先保留通道收取真实 ECHILD 与 launcher 退出，不能先断开证明。
